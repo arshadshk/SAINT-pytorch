@@ -68,6 +68,11 @@ class Encoder_block(nn.Module):
 
 
 class Decoder_block(nn.Module):
+    """
+    M1 = SkipConct(Multihead(LayerNorm(Qin;Kin;Vin)))
+    M2 = SkipConct(Multihead(LayerNorm(M1;O;O)))
+    L = SkipConct(FFN(LayerNorm(M2)))
+    """
 
     def __init__(self,dim_model ,total_in, heads_de,  ):
         super().__init__()
