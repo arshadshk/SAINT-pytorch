@@ -24,11 +24,13 @@ class Encoder_block(nn.Module):
     O = SkipConct(FFN(LayerNorm(M)))
     """
 
-    def __init__(self , dim_model, heads_en, total_ex ,total_cat):
+    def __init__(self , dim_model, heads_en, total_ex ,total_cat, seq_len):
         super().__init__()
+        self.seq_len = seq_len
         self.embd_ex =   nn.Embedding( total_ex , embedding_dim = dim_model )                   # embedings  q,k,v = E = exercise ID embedding, category embedding, and positionembedding.
         self.embd_cat =  nn.Embedding( total_cat, embedding_dim = dim_model )
-        #embd_pos =  nn.Embedding( total_pos, embedding_dim = dim_model )
+        self.embd_pos   = nn.Embedding(  seq_len , embedding_dim = dim_model )                  #positional embedding
+
         self.multi_en = nn.MultiheadAttention( embed_dim= dim_model, num_heads= heads_en,  )     # multihead attention    ## todo add dropout, LayerNORM
         self.ffn_en = Feed_Forward_block( dim_model )                                            # feedforward block     ## todo dropout, LayerNorm
         self.layer_norm1 = nn.LayerNorm( dim_model )
@@ -46,6 +48,10 @@ class Encoder_block(nn.Module):
             out = in_ex + in_cat #+ in_pos                      # (b,n,d)
         else:
             out = in_ex
+        
+        in_pos = get_pos(self.seq_len)
+        in_pos = self.embd_pos( in_pos )
+        out = out + in_pos                                      # Applying positional embedding
 
         out = out.permute(1,0,2)                                # (n,b,d)  # print('pre multi', out.shape )
         
@@ -74,10 +80,11 @@ class Decoder_block(nn.Module):
     L = SkipConct(FFN(LayerNorm(M2)))
     """
 
-    def __init__(self,dim_model ,total_in, heads_de,  ):
+    def __init__(self,dim_model ,total_in, heads_de,seq_len  ):
         super().__init__()
-
+        self.seq_len    = seq_len
         self.embd_in    = nn.Embedding(  total_in , embedding_dim = dim_model )                  #interaction embedding
+        self.embd_pos   = nn.Embedding(  seq_len , embedding_dim = dim_model )                  #positional embedding
         self.multi_de1  = nn.MultiheadAttention( embed_dim= dim_model, num_heads= heads_de  )  # M1 multihead for interaction embedding as q k v
         self.multi_de2  = nn.MultiheadAttention( embed_dim= dim_model, num_heads= heads_de  )  # M2 multihead for M1 out, encoder out, encoder out as q k v
         self.ffn_en     = Feed_Forward_block( dim_model )                                         # feed forward layer
@@ -92,13 +99,16 @@ class Decoder_block(nn.Module):
          ## todo create a positional encoding ( two options numeric, sine)
         if first_block:
             in_in = self.embd_in( in_in )
-            #in_pos = self.embd_pos( in_pos )
 
             #combining the embedings
             out = in_in #+ in_cat #+ in_pos                         # (b,n,d)
         else:
             out = in_in
-        
+
+        in_pos = get_pos(self.seq_len)
+        in_pos = self.embd_pos( in_pos )
+        out = out + in_pos                                          # Applying positional embedding
+
         out = out.permute(1,0,2)                                    # (n,b,d)# print('pre multi', out.shape )
         n,_,_ = out.shape
 
@@ -134,17 +144,19 @@ def get_mask(seq_len):
     ##todo add this to device
     return torch.from_numpy( np.triu(np.ones((seq_len ,seq_len)), k=1).astype('bool'))
 
-
+def get_pos(seq_len):
+    # use sine positional embeddinds
+    return torch.arange( seq_len ).unsqueeze(0) 
 
 class saint(nn.Module):
-    def __init__(self,dim_model,num_en, num_de ,heads_en, total_ex ,total_cat,total_in,heads_de, ):
+    def __init__(self,dim_model,num_en, num_de ,heads_en, total_ex ,total_cat,total_in,heads_de,seq_len ):
         super().__init__( )
 
         self.num_en = num_en
         self.num_de = num_de
 
-        self.encoder = get_clones( Encoder_block(dim_model, heads_en , total_ex ,total_cat) , num_en)
-        self.decoder = get_clones( Decoder_block(dim_model ,total_in, heads_de)             , num_de)
+        self.encoder = get_clones( Encoder_block(dim_model, heads_en , total_ex ,total_cat,seq_len) , num_en)
+        self.decoder = get_clones( Decoder_block(dim_model ,total_in, heads_de,seq_len)             , num_de)
 
         self.out = nn.Linear(in_features= dim_model , out_features=1)
     
@@ -197,6 +209,7 @@ model = saint(dim_model=128,
             total_ex=total_ex,
             total_cat=total_cat,
             total_in=total_in,
+            seq_len=seq_len
             )
 
 outs = model(in_ex, in_cat, in_de)
